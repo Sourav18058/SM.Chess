@@ -144,6 +144,19 @@
             cursor: pointer;
             transition: background-color 0.2s;
             position: relative;
+            overflow: visible;
+        }
+
+        .piece {
+            transition: all 0.3s ease;
+        }
+
+        .piece.animating {
+            position: absolute;
+            z-index: 1000;
+            transition: all 0.8s cubic-bezier(0.34, 1.56, 0.64, 1);
+            transform: scale(1.5) rotate(360deg);
+            filter: drop-shadow(0 10px 20px rgba(0,0,0,0.5));
         }
 
         .square.light {
@@ -173,16 +186,20 @@
 
         .square.last-move-from {
             background-color: #f7dc6f !important;
-            animation: moveHighlight 1s ease-in-out;
+            animation: moveHighlight 1.5s ease-in-out;
         }
 
         .square.last-move-to {
             background-color: #f39c12 !important;
-            animation: moveHighlight 1s ease-in-out;
+            animation: moveHighlight 1.5s ease-in-out, squarePulse 0.8s ease-in-out;
         }
 
         .square.moving-piece {
-            animation: pieceMove 0.5s ease-in-out;
+            animation: destinationGlow 0.8s ease-in-out;
+        }
+
+        .square.capture-effect {
+            animation: captureShake 0.5s ease-in-out;
         }
 
         @keyframes moveHighlight {
@@ -194,6 +211,37 @@
             }
             100% {
                 box-shadow: 0 0 0 0 rgba(243, 156, 18, 0);
+            }
+        }
+
+        @keyframes squarePulse {
+            0%, 100% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.1);
+                box-shadow: 0 0 30px rgba(243, 156, 18, 0.8);
+            }
+        }
+
+        @keyframes destinationGlow {
+            0%, 100% {
+                box-shadow: inset 0 0 0 0 rgba(46, 204, 113, 0);
+            }
+            50% {
+                box-shadow: inset 0 0 30px 5px rgba(46, 204, 113, 0.6);
+            }
+        }
+
+        @keyframes captureShake {
+            0%, 100% {
+                transform: translateX(0);
+            }
+            25% {
+                transform: translateX(-5px) rotate(-5deg);
+            }
+            75% {
+                transform: translateX(5px) rotate(5deg);
             }
         }
 
@@ -379,6 +427,7 @@
         let gameOver = false;
         let playerWins = 0;
         let computerWins = 0;
+        let lastMove = null;
 
         // Chess piece Unicode symbols
         const pieces = {
@@ -436,6 +485,10 @@
             currentTurn = 'white';
             moveHistory = [];
             gameOver = false;
+            lastMove = null;
+            document.getElementById('status').textContent = '';
+            document.getElementById('check-warning').style.display = 'none';
+            document.getElementById('thinking-indicator').style.display = 'none';
             updateTurnIndicator();
         }
 
@@ -449,10 +502,24 @@
                     square.className = `square ${(row + col) % 2 === 0 ? 'light' : 'dark'}`;
                     square.dataset.row = row;
                     square.dataset.col = col;
+                    square.id = `square-${row}-${col}`;
+                    
+                    // Highlight last move
+                    if (lastMove) {
+                        if (lastMove.from.row === row && lastMove.from.col === col) {
+                            square.classList.add('last-move-from');
+                        }
+                        if (lastMove.to.row === row && lastMove.to.col === col) {
+                            square.classList.add('last-move-to');
+                        }
+                    }
                     
                     const piece = board[row][col];
                     if (piece) {
-                        square.textContent = pieces[piece.color][piece.type];
+                        const pieceSpan = document.createElement('span');
+                        pieceSpan.className = 'piece';
+                        pieceSpan.textContent = pieces[piece.color][piece.type];
+                        square.appendChild(pieceSpan);
                     }
                     
                     square.onclick = () => handleSquareClick(row, col);
@@ -469,15 +536,17 @@
             if (selectedPiece) {
                 if (isValidMove(selectedSquare.row, selectedSquare.col, row, col)) {
                     if (!wouldBeInCheck(selectedSquare.row, selectedSquare.col, row, col, playerColor)) {
-                        makeMove(selectedSquare.row, selectedSquare.col, row, col);
-                        clearHighlights();
-                        selectedPiece = null;
-                        selectedSquare = null;
-                        
-                        if (!gameOver) {
-                            document.getElementById('thinking-indicator').style.display = 'block';
-                            setTimeout(makeComputerMove, 2000);
-                        }
+                        animateMove(selectedSquare.row, selectedSquare.col, row, col, () => {
+                            makeMove(selectedSquare.row, selectedSquare.col, row, col);
+                            clearHighlights();
+                            selectedPiece = null;
+                            selectedSquare = null;
+                            
+                            if (!gameOver) {
+                                document.getElementById('thinking-indicator').style.display = 'block';
+                                setTimeout(makeComputerMove, 2500);
+                            }
+                        });
                     } else {
                         document.getElementById('status').textContent = '⚠️ Invalid move! Your King would be in check!';
                         setTimeout(() => {
@@ -622,6 +691,11 @@
                 capturedPiece: board[toRow][toCol]
             });
             
+            lastMove = {
+                from: {row: fromRow, col: fromCol},
+                to: {row: toRow, col: toCol}
+            };
+            
             const capturedPiece = board[toRow][toCol];
             const movingPiece = board[fromRow][fromCol];
             
@@ -649,6 +723,64 @@
             updateTurnIndicator();
             checkForCheck();
             checkGameOver();
+        }
+
+        function animateMove(fromRow, fromCol, toRow, toCol, callback) {
+            const fromSquare = document.getElementById(`square-${fromRow}-${fromCol}`);
+            const toSquare = document.getElementById(`square-${toRow}-${toCol}`);
+            
+            if (!fromSquare || !toSquare) {
+                callback();
+                return;
+            }
+            
+            const piece = fromSquare.querySelector('.piece');
+            if (!piece) {
+                callback();
+                return;
+            }
+            
+            // Get positions
+            const fromRect = fromSquare.getBoundingClientRect();
+            const toRect = toSquare.getBoundingClientRect();
+            
+            // Check if capturing
+            const isCapture = board[toRow][toCol] !== null;
+            
+            // Create flying piece
+            const flyingPiece = piece.cloneNode(true);
+            flyingPiece.style.position = 'fixed';
+            flyingPiece.style.left = fromRect.left + fromRect.width / 2 - 22.5 + 'px';
+            flyingPiece.style.top = fromRect.top + fromRect.height / 2 - 22.5 + 'px';
+            flyingPiece.style.fontSize = '45px';
+            flyingPiece.style.zIndex = '1000';
+            flyingPiece.style.pointerEvents = 'none';
+            flyingPiece.classList.add('animating');
+            document.body.appendChild(flyingPiece);
+            
+            // Hide original piece
+            piece.style.opacity = '0';
+            
+            // Add destination glow
+            toSquare.classList.add('moving-piece');
+            
+            // Add capture shake effect
+            if (isCapture) {
+                toSquare.classList.add('capture-effect');
+            }
+            
+            // Animate flying piece
+            setTimeout(() => {
+                flyingPiece.style.left = toRect.left + toRect.width / 2 - 22.5 + 'px';
+                flyingPiece.style.top = toRect.top + toRect.height / 2 - 22.5 + 'px';
+            }, 50);
+            
+            // Complete animation
+            setTimeout(() => {
+                document.body.removeChild(flyingPiece);
+                toSquare.classList.remove('moving-piece', 'capture-effect');
+                callback();
+            }, 900);
         }
 
         function makeComputerMove() {
@@ -684,8 +816,31 @@
                 }
             }
             
-            makeMove(bestMove.from.row, bestMove.from.col, bestMove.to.row, bestMove.to.col);
-            document.getElementById('thinking-indicator').style.display = 'none';
+            // Show computer's selected piece with delay
+            highlightComputerMove(bestMove.from.row, bestMove.from.col);
+            
+            setTimeout(() => {
+                // Show possible destination
+                highlightComputerDestination(bestMove.to.row, bestMove.to.col);
+                
+                setTimeout(() => {
+                    // Animate the move
+                    animateMove(bestMove.from.row, bestMove.from.col, bestMove.to.row, bestMove.to.col, () => {
+                        makeMove(bestMove.from.row, bestMove.from.col, bestMove.to.row, bestMove.to.col);
+                        document.getElementById('thinking-indicator').style.display = 'none';
+                    });
+                }, 800);
+            }, 1000);
+        }
+
+        function highlightComputerMove(row, col) {
+            const squares = document.querySelectorAll('.square');
+            squares[row * 8 + col].classList.add('selected');
+        }
+
+        function highlightComputerDestination(row, col) {
+            const squares = document.querySelectorAll('.square');
+            squares[row * 8 + col].classList.add('possible-move');
         }
 
         function getAllValidMoves(color) {
