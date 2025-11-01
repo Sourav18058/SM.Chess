@@ -107,11 +107,21 @@
             font-weight: bold;
         }
 
+        .player-score {
+            font-size: 0.9em;
+            opacity: 0.9;
+            margin-top: 5px;
+        }
+
         .turn-indicator {
             background: rgba(255,255,255,0.3);
             padding: 5px 15px;
             border-radius: 20px;
             font-size: 0.9em;
+        }
+
+        .score-container {
+            text-align: center;
         }
 
         #chessboard {
@@ -161,6 +171,44 @@
             position: absolute;
         }
 
+        .square.last-move-from {
+            background-color: #f7dc6f !important;
+            animation: moveHighlight 1s ease-in-out;
+        }
+
+        .square.last-move-to {
+            background-color: #f39c12 !important;
+            animation: moveHighlight 1s ease-in-out;
+        }
+
+        .square.moving-piece {
+            animation: pieceMove 0.5s ease-in-out;
+        }
+
+        @keyframes moveHighlight {
+            0% {
+                box-shadow: 0 0 0 0 rgba(243, 156, 18, 0.7);
+            }
+            50% {
+                box-shadow: 0 0 0 20px rgba(243, 156, 18, 0);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(243, 156, 18, 0);
+            }
+        }
+
+        @keyframes pieceMove {
+            0% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.3) rotate(5deg);
+            }
+            100% {
+                transform: scale(1);
+            }
+        }
+
         .square:hover {
             opacity: 0.8;
         }
@@ -204,6 +252,34 @@
             font-weight: bold;
             color: #333;
             min-height: 30px;
+        }
+
+        .thinking-indicator {
+            text-align: center;
+            margin-top: 10px;
+            font-size: 1em;
+            color: #667eea;
+            font-style: italic;
+        }
+
+        .check-warning {
+            background: #ff6b6b;
+            color: white;
+            padding: 10px;
+            border-radius: 10px;
+            text-align: center;
+            margin-top: 10px;
+            font-weight: bold;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.7;
+            }
         }
 
         footer {
@@ -263,13 +339,21 @@
     <div id="game-screen">
         <div class="game-container">
             <div class="player-info">
-                <div class="player-name" id="computer-name">Computer</div>
+                <div class="score-container">
+                    <div class="player-name" id="computer-name">Computer</div>
+                    <div class="player-score" id="computer-score">Wins: 0</div>
+                </div>
                 <div class="turn-indicator" id="turn-indicator">White's Turn</div>
-                <div class="player-name" id="player-name">Player</div>
+                <div class="score-container">
+                    <div class="player-name" id="player-name">Player</div>
+                    <div class="player-score" id="player-score">Wins: 0</div>
+                </div>
             </div>
             
             <div id="chessboard"></div>
             
+            <div id="thinking-indicator" class="thinking-indicator" style="display: none;">🤔 Computer is thinking...</div>
+            <div id="check-warning" class="check-warning" style="display: none;"></div>
             <div id="status"></div>
             
             <div class="controls">
@@ -293,6 +377,8 @@
         let playerName = '';
         let moveHistory = [];
         let gameOver = false;
+        let playerWins = 0;
+        let computerWins = 0;
 
         // Chess piece Unicode symbols
         const pieces = {
@@ -327,11 +413,12 @@
             document.getElementById('game-screen').style.display = 'block';
             document.getElementById('player-name').textContent = `Player: ${playerName}`;
             
+            updateScoreDisplay();
             initializeBoard();
             renderBoard();
             
             if (playerColor === 'black') {
-                setTimeout(makeComputerMove, 500);
+                setTimeout(makeComputerMove, 2000);
             }
         }
 
@@ -381,13 +468,21 @@
             
             if (selectedPiece) {
                 if (isValidMove(selectedSquare.row, selectedSquare.col, row, col)) {
-                    makeMove(selectedSquare.row, selectedSquare.col, row, col);
-                    clearHighlights();
-                    selectedPiece = null;
-                    selectedSquare = null;
-                    
-                    if (!gameOver) {
-                        setTimeout(makeComputerMove, 500);
+                    if (!wouldBeInCheck(selectedSquare.row, selectedSquare.col, row, col, playerColor)) {
+                        makeMove(selectedSquare.row, selectedSquare.col, row, col);
+                        clearHighlights();
+                        selectedPiece = null;
+                        selectedSquare = null;
+                        
+                        if (!gameOver) {
+                            document.getElementById('thinking-indicator').style.display = 'block';
+                            setTimeout(makeComputerMove, 2000);
+                        }
+                    } else {
+                        document.getElementById('status').textContent = '⚠️ Invalid move! Your King would be in check!';
+                        setTimeout(() => {
+                            document.getElementById('status').textContent = '';
+                        }, 2000);
                     }
                 } else if (clickedPiece && clickedPiece.color === playerColor) {
                     clearHighlights();
@@ -527,12 +622,32 @@
                 capturedPiece: board[toRow][toCol]
             });
             
+            const capturedPiece = board[toRow][toCol];
+            const movingPiece = board[fromRow][fromCol];
+            
             board[toRow][toCol] = board[fromRow][fromCol];
             board[fromRow][fromCol] = null;
+            
+            // Check if king was captured
+            if (capturedPiece && capturedPiece.type === 'king') {
+                gameOver = true;
+                if (capturedPiece.color === playerColor) {
+                    computerWins++;
+                    document.getElementById('status').textContent = '👑 Checkmate! Computer captured your King and wins!';
+                } else {
+                    playerWins++;
+                    document.getElementById('status').textContent = '🎉 Checkmate! You captured the King and win!';
+                }
+                updateScoreDisplay();
+                renderBoard();
+                document.getElementById('thinking-indicator').style.display = 'none';
+                return;
+            }
             
             currentTurn = currentTurn === 'white' ? 'black' : 'white';
             renderBoard();
             updateTurnIndicator();
+            checkForCheck();
             checkGameOver();
         }
 
@@ -540,19 +655,26 @@
             if (gameOver) return;
             
             const moves = getAllValidMoves(currentTurn);
-            if (moves.length === 0) {
+            const validMoves = moves.filter(move => 
+                !wouldBeInCheck(move.from.row, move.from.col, move.to.row, move.to.col, currentTurn)
+            );
+            
+            if (validMoves.length === 0) {
                 gameOver = true;
+                playerWins++;
                 document.getElementById('status').textContent = '🎉 Checkmate! You win!';
+                updateScoreDisplay();
+                document.getElementById('thinking-indicator').style.display = 'none';
                 return;
             }
             
-            let bestMove = moves[0];
+            let bestMove = validMoves[0];
             let bestScore = -Infinity;
             
-            for (const move of moves) {
+            for (const move of validMoves) {
                 let score = 0;
                 if (move.capturedPiece) {
-                    score = getPieceValue(move.capturedPiece.type);
+                    score = getPieceValue(move.capturedPiece.type) * 10;
                 }
                 score += Math.random();
                 
@@ -563,6 +685,7 @@
             }
             
             makeMove(bestMove.from.row, bestMove.from.col, bestMove.to.row, bestMove.to.col);
+            document.getElementById('thinking-indicator').style.display = 'none';
         }
 
         function getAllValidMoves(color) {
@@ -596,14 +719,80 @@
         function checkGameOver() {
             const opponentColor = currentTurn;
             const moves = getAllValidMoves(opponentColor);
+            const validMoves = moves.filter(move => 
+                !wouldBeInCheck(move.from.row, move.from.col, move.to.row, move.to.col, opponentColor)
+            );
             
-            if (moves.length === 0) {
+            if (validMoves.length === 0) {
                 gameOver = true;
                 if (opponentColor === playerColor) {
+                    computerWins++;
                     document.getElementById('status').textContent = '❌ Checkmate! Computer wins!';
                 } else {
+                    playerWins++;
                     document.getElementById('status').textContent = '🎉 Checkmate! You win!';
                 }
+                updateScoreDisplay();
+            }
+        }
+
+        function findKing(color) {
+            for (let row = 0; row < 8; row++) {
+                for (let col = 0; col < 8; col++) {
+                    const piece = board[row][col];
+                    if (piece && piece.type === 'king' && piece.color === color) {
+                        return {row, col};
+                    }
+                }
+            }
+            return null;
+        }
+
+        function isSquareUnderAttack(row, col, byColor) {
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    const piece = board[r][c];
+                    if (piece && piece.color === byColor) {
+                        if (isValidMove(r, c, row, col)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        function isInCheck(color) {
+            const king = findKing(color);
+            if (!king) return false;
+            
+            const opponentColor = color === 'white' ? 'black' : 'white';
+            return isSquareUnderAttack(king.row, king.col, opponentColor);
+        }
+
+        function wouldBeInCheck(fromRow, fromCol, toRow, toCol, color) {
+            const originalPiece = board[toRow][toCol];
+            const movingPiece = board[fromRow][fromCol];
+            
+            board[toRow][toCol] = movingPiece;
+            board[fromRow][fromCol] = null;
+            
+            const inCheck = isInCheck(color);
+            
+            board[fromRow][fromCol] = movingPiece;
+            board[toRow][toCol] = originalPiece;
+            
+            return inCheck;
+        }
+
+        function checkForCheck() {
+            const checkWarning = document.getElementById('check-warning');
+            
+            if (isInCheck(currentTurn)) {
+                checkWarning.style.display = 'block';
+                checkWarning.textContent = `⚠️ CHECK! ${currentTurn === 'white' ? 'White' : 'Black'} King is under attack!`;
+            } else {
+                checkWarning.style.display = 'none';
             }
         }
 
@@ -612,8 +801,13 @@
             indicator.textContent = currentTurn === 'white' ? "White's Turn" : "Black's Turn";
         }
 
+        function updateScoreDisplay() {
+            document.getElementById('player-score').textContent = `Wins: ${playerWins}`;
+            document.getElementById('computer-score').textContent = `Wins: ${computerWins}`;
+        }
+
         function undoMove() {
-            if (moveHistory.length === 0) return;
+            if (moveHistory.length === 0 || gameOver) return;
             
             const lastMove = moveHistory.pop();
             board[lastMove.from.row][lastMove.from.col] = lastMove.piece;
@@ -630,8 +824,11 @@
             
             gameOver = false;
             document.getElementById('status').textContent = '';
+            document.getElementById('check-warning').style.display = 'none';
+            document.getElementById('thinking-indicator').style.display = 'none';
             renderBoard();
             updateTurnIndicator();
+            checkForCheck();
         }
 
         function restartGame() {
